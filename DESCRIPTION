@@ -1,0 +1,43 @@
+Package: CohortDAG
+Title: DAG-Based Batch Cohort SQL Generation for OMOP CDM
+Version: 0.1.0
+Authors@R: c(
+    person("Adam", "Black", , "ablack3@gmail.com", role = c("aut", "cre"),
+           comment = c(ORCID = "0000-0001-5576-8701")),
+    person("Artem", "Gorbachev", , "artem.gorbachev@odysseusinc.com", role = "aut")
+  )
+Description: Generates optimized batch SQL for ATLAS/OHDSI cohort definitions
+    using a directed acyclic graph (DAG) execution plan. Deduplicates shared
+    computations across cohorts, translates ATLAS JSON to SQL without Java/CirceR,
+    and supports incremental caching with Merkle-tree validation.
+License: Apache License (>= 2)
+URL: https://github.com/darwin-eu/CohortDAG
+BugReports: https://github.com/darwin-eu/CohortDAG/issues
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
+Depends:
+    R (>= 4.1.0)
+Imports:
+    CDMConnector (>= 2.5.0),
+    DBI (>= 0.3.0),
+    jsonlite,
+    stringi,
+    purrr,
+    rlang,
+    checkmate,
+    cli,
+    dplyr,
+    dbplyr (>= 2.5.0),
+    methods,
+    glue,
+    stringr,
+    withr,
+    omopgenerics (>= 1.2.0)
+Suggests:
+    duckdb,
+    testthat (>= 3.0.0),
+    uuid,
+    tidyr
+Config/testthat/edition: 3
+Config/testthat/parallel: false
