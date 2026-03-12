@@ -1,3 +1,4 @@
+skip_if_not_tier(3L)
 skip_on_cran()
 # Live database tests for generateCohortSet2 (optimizer.R pipeline)
 #

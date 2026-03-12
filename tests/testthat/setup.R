@@ -1,6 +1,24 @@
 library(testthat)
 
-# CohortDAG depends on CDMConnector, so we can use its test helpers
+# ---------------------------------------------------------------------------
+# Test tier helpers
+# ---------------------------------------------------------------------------
+# Tier 1: Always runs (quick coverage, DuckDB, <5 min)
+# Tier 2: RUN_TIER_2=true (full 3000+ cohort library, 30-60 min)
+# Tier 3: RUN_TIER_3=true (live database platforms, requires DB env vars)
+
+skip_if_not_tier <- function(tier) {
+  if (tier == 1L) return(invisible(NULL))  # Tier 1 always runs
+  env_var <- paste0("RUN_TIER_", tier)
+  val <- Sys.getenv(env_var, unset = "")
+  if (!tolower(val) %in% c("true", "1", "yes")) {
+    skip(paste0("Tier ", tier, " tests skipped (set ", env_var, "=true to run)"))
+  }
+}
+
+# ---------------------------------------------------------------------------
+# CDMConnector setup (for integration tests)
+# ---------------------------------------------------------------------------
 if (rlang::is_installed("CDMConnector")) {
   library(CDMConnector)
 
@@ -16,7 +34,6 @@ if (rlang::is_installed("CDMConnector")) {
     if (Sys.getenv("skip_eunomia_download_test") != "TRUE") downloadEunomiaData(overwrite = TRUE)
   }, error = function(e) NA)
 
-  # Helper: create a duckdb connection to an eunomia copy and auto-cleanup
   local_eunomia_con <- function(..., env = parent.frame()) {
     dbpath <- eunomiaDir(...)
     con <- DBI::dbConnect(duckdb::duckdb(), dbpath)
@@ -32,7 +49,6 @@ if (rlang::is_installed("CDMConnector")) {
     DBI::dbDisconnect(con)
   }
 
-  # Database test matrix - only DuckDB for CohortDAG integration tests
   dbToTest <- "duckdb"
   ciTestDbs <- c("duckdb")
 

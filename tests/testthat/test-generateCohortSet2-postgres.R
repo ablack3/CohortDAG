@@ -1,3 +1,4 @@
+skip_if_not_tier(3L)
 # Live PostgreSQL tests for generateCohortSet2
 # Tests against a real PostgreSQL CDM database using both DatabaseConnector and RPostgres
 
