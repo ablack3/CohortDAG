@@ -1,0 +1,13 @@
+"metric","value"
+"total_cohorts",3180
+"total_batches",64
+"batches_ok",0
+"batches_error",0
+"batches_mismatch",0
+"batches_skipped",64
+"total_time_old_sec",0
+"total_time_new_sec",0
+"overall_ratio",NA
+"median_batch_ratio",NA
+"total_rows_old",0
+"total_rows_new",0
