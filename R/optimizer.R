@@ -67,7 +67,7 @@ rewrite_to_domain_caches <- function(sql, cdm_schema = "@cdm_database_schema", o
   sql
 }
 
-# atlasCohortGenerator: single workflow JSON -> optimized SQL (standalone)
+# CohortDAG: single workflow JSON -> optimized SQL (standalone)
 
 # CDM/vocabulary table names that may appear in cohort SQL (uppercase as in generated SQL)
 CDM_TABLE_NAMES_FOR_QUOTE <- c(
@@ -699,7 +699,7 @@ generateCohortSet2 <- function(cdm,
   sql <- quote_cdm_table_refs(sql, con, cdm_schema_str)
 
   # Debug: dump pre-translate SQL (set option to a file path)
-  debug_sql_file <- getOption("atlasCohortGenerator.debug_sql_file")
+  debug_sql_file <- getOption("CohortDAG.debug_sql_file")
   if (is.character(debug_sql_file) && length(debug_sql_file) == 1L && nzchar(debug_sql_file)) {
     writeLines(sql, debug_sql_file)
     message("Batch SQL written to: ", debug_sql_file)
@@ -1268,10 +1268,10 @@ CRITERIA_TYPE_TO_CDM_TABLE <- c(
 collect_criteria_types_from_group <- function(group, acc = NULL) {
   is_top <- is.null(acc)
   if (is_top) acc <- new.env(parent = emptyenv())
-  if (is_top) { acc$items <- vector("list", 32L); acc$n <- 0L }
+  if (is_top) { acc$items <- vector("list", 32L); acc$n <- 0L; acc$unfiltered <- character(0) }
 
   if (!is.list(group)) {
-    if (is_top) return(unlist(acc$items[seq_len(acc$n)]))
+    if (is_top) return(list(types = unlist(acc$items[seq_len(acc$n)]), unfiltered = unique(acc$unfiltered)))
     return(invisible(NULL))
   }
   criteria_list <- get_key(group, c("CriteriaList", "criteriaList")) %||% list()
@@ -1281,6 +1281,12 @@ collect_criteria_types_from_group <- function(group, acc = NULL) {
       acc$n <- acc$n + 1L
       if (acc$n > length(acc$items)) acc$items <- c(acc$items, vector("list", length(acc$items)))
       acc$items[[acc$n]] <- ext$type
+      # Track unconstrained criteria (no CodesetId) — these need unfiltered tables
+      csid <- ext$data$CodesetId %||% ext$data$codesetId
+      if (is.null(csid)) {
+        tbl <- CRITERIA_TYPE_TO_CDM_TABLE[ext$type]
+        if (!is.na(tbl)) acc$unfiltered <- c(acc$unfiltered, tbl)
+      }
       # VisitType filter generates JOIN to VISIT_OCCURRENCE
       vt <- ext$data$VisitType %||% ext$data$visitType
       vtc <- ext$data$VisitTypeCS %||% ext$data$visitTypeCS
@@ -1299,7 +1305,7 @@ collect_criteria_types_from_group <- function(group, acc = NULL) {
   for (g in groups) {
     collect_criteria_types_from_group(g, acc)
   }
-  if (is_top) return(unlist(acc$items[seq_len(acc$n)]))
+  if (is_top) return(list(types = unlist(acc$items[seq_len(acc$n)]), unfiltered = unique(acc$unfiltered)))
   invisible(NULL)
 }
 
@@ -1314,6 +1320,7 @@ collect_batch_used_domains_from_cohorts <- function(cohort_list) {
   acc <- new.env(parent = emptyenv())
   acc$items <- vector("list", 64L)
   acc$n <- 0L
+  acc$unfiltered <- character(0)
 
   for (cohort in cohort_list) {
     pc <- get_key(cohort, c("PrimaryCriteria", "primaryCriteria"))

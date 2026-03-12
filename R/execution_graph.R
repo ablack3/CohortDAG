@@ -505,12 +505,14 @@ build_execution_dag <- function(cohort_list, cohort_ids, options = list()) {
 
   cohort_finals <- list()
   used_tables <- character(0)
+  unfiltered_tables <- character(0)
 
   for (i in seq_along(cohort_list)) {
     result <- decompose_cohort(cohort_list[[i]], cohort_ids[[i]], i, cs_map, nodes, options)
     nodes <- result$nodes
     cohort_finals[[as.character(cohort_ids[[i]])]] <- result$final_hash
     used_tables <- unique(c(used_tables, result$used_tables))
+    unfiltered_tables <- unique(c(unfiltered_tables, result$unfiltered_tables))
   }
 
   list(
@@ -518,6 +520,7 @@ build_execution_dag <- function(cohort_list, cohort_ids, options = list()) {
     cohort_finals = cohort_finals,
     cs_map = cs_map,
     used_tables = used_tables,
+    unfiltered_tables = unfiltered_tables,
     cohort_ids = cohort_ids
   )
 }
@@ -534,6 +537,13 @@ build_execution_dag <- function(cohort_list, cohort_ids, options = list()) {
 decompose_cohort <- function(cohort, cohort_id, cohort_idx, cs_map, nodes, options) {
   cdm_schema <- options$cdm_schema %||% "@cdm_database_schema"
   used_tables <- "OBSERVATION_PERIOD"  # always needed
+  unfiltered_tables <- character(0)    # tables needing full CDM (no concept filter)
+
+  # Helper: check if a criteria has a CodesetId (constrained) or not (unconstrained)
+  needs_unfiltered <- function(ext) {
+    csid <- ext$data$CodesetId %||% ext$data$codesetId
+    is.null(csid)
+  }
 
   # ---- Primary Events ----
   pc <- get_key(cohort, c("PrimaryCriteria", "primaryCriteria"))
@@ -545,7 +555,10 @@ decompose_cohort <- function(cohort, cohort_id, cohort_idx, cs_map, nodes, optio
     ext <- extract_criteria(cr)
     if (!is.null(ext)) {
       tbl <- CRITERIA_TYPE_TO_CDM_TABLE[ext$type]
-      if (!is.na(tbl)) used_tables <- c(used_tables, tbl)
+      if (!is.na(tbl)) {
+        used_tables <- c(used_tables, tbl)
+        if (needs_unfiltered(ext)) unfiltered_tables <- c(unfiltered_tables, tbl)
+      }
       # VisitType filter generates JOIN to VISIT_OCCURRENCE
       vt <- ext$data$VisitType %||% ext$data$visitType
       vtc <- ext$data$VisitTypeCS %||% ext$data$visitTypeCS
@@ -554,11 +567,12 @@ decompose_cohort <- function(cohort, cohort_id, cohort_idx, cs_map, nodes, optio
       # CorrelatedCriteria within this criterion may reference additional domains
       corr <- ext$data$CorrelatedCriteria %||% ext$data$correlatedCriteria
       if (!is.null(corr)) {
-        corr_types <- collect_criteria_types_from_group(corr)
-        for (tp in corr_types) {
+        corr_info <- collect_criteria_types_from_group(corr)
+        for (tp in corr_info$types) {
           tbl2 <- CRITERIA_TYPE_TO_CDM_TABLE[tp]
           if (!is.na(tbl2)) used_tables <- c(used_tables, tbl2)
         }
+        unfiltered_tables <- c(unfiltered_tables, corr_info$unfiltered)
       }
     }
     cr_norm <- normalize_criterion_for_hash(cr, cs_map, cohort_idx)
@@ -594,11 +608,12 @@ decompose_cohort <- function(cohort, cohort_id, cohort_idx, cs_map, nodes, optio
     ac_norm <- normalize_criteria_group_for_hash(add_criteria, cs_map, cohort_idx)
     ac_hash <- string_hash(jsonlite::toJSON(ac_norm, auto_unbox = TRUE, null = "null", force = TRUE))
     # Collect used tables from additional criteria
-    ac_types <- collect_criteria_types_from_group(add_criteria)
-    for (tp in ac_types) {
+    ac_info <- collect_criteria_types_from_group(add_criteria)
+    for (tp in ac_info$types) {
       tbl <- CRITERIA_TYPE_TO_CDM_TABLE[tp]
       if (!is.na(tbl)) used_tables <- c(used_tables, tbl)
     }
+    unfiltered_tables <- c(unfiltered_tables, ac_info$unfiltered)
   }
 
   ql <- get_key(cohort, c("QualifiedLimit", "qualifiedLimit"))
@@ -625,11 +640,12 @@ decompose_cohort <- function(cohort, cohort_id, cohort_idx, cs_map, nodes, optio
     if (is.null(ir_expr)) next
 
     # Collect used tables from inclusion rules
-    ir_types <- collect_criteria_types_from_group(ir_expr)
-    for (tp in ir_types) {
+    ir_info <- collect_criteria_types_from_group(ir_expr)
+    for (tp in ir_info$types) {
       tbl <- CRITERIA_TYPE_TO_CDM_TABLE[tp]
       if (!is.na(tbl)) used_tables <- c(used_tables, tbl)
     }
+    unfiltered_tables <- c(unfiltered_tables, ir_info$unfiltered)
 
     ir_expr_norm <- normalize_criteria_group_for_hash(ir_expr, cs_map, cohort_idx)
     ir_expr_hash <- string_hash(jsonlite::toJSON(ir_expr_norm, auto_unbox = TRUE,
@@ -670,7 +686,10 @@ decompose_cohort <- function(cohort, cohort_id, cohort_idx, cs_map, nodes, optio
     ext <- extract_criteria(cc)
     if (!is.null(ext)) {
       tbl <- CRITERIA_TYPE_TO_CDM_TABLE[ext$type]
-      if (!is.na(tbl)) used_tables <- c(used_tables, tbl)
+      if (!is.na(tbl)) {
+        used_tables <- c(used_tables, tbl)
+        if (needs_unfiltered(ext)) unfiltered_tables <- c(unfiltered_tables, tbl)
+      }
       # VisitType filter generates JOIN to VISIT_OCCURRENCE
       vt <- ext$data$VisitType %||% ext$data$visitType
       vtc <- ext$data$VisitTypeCS %||% ext$data$visitTypeCS
@@ -679,11 +698,12 @@ decompose_cohort <- function(cohort, cohort_id, cohort_idx, cs_map, nodes, optio
       # CorrelatedCriteria within censoring criterion
       corr <- ext$data$CorrelatedCriteria %||% ext$data$correlatedCriteria
       if (!is.null(corr)) {
-        corr_types <- collect_criteria_types_from_group(corr)
-        for (tp in corr_types) {
+        corr_info <- collect_criteria_types_from_group(corr)
+        for (tp in corr_info$types) {
           tbl2 <- CRITERIA_TYPE_TO_CDM_TABLE[tp]
           if (!is.na(tbl2)) used_tables <- c(used_tables, tbl2)
         }
+        unfiltered_tables <- c(unfiltered_tables, corr_info$unfiltered)
       }
     }
   }
@@ -725,7 +745,8 @@ decompose_cohort <- function(cohort, cohort_id, cohort_idx, cs_map, nodes, optio
   list(
     nodes = nodes,
     final_hash = fc_hash,
-    used_tables = unique(used_tables)
+    used_tables = unique(used_tables),
+    unfiltered_tables = unique(unfiltered_tables)
   )
 }
 
@@ -848,7 +869,7 @@ emit_dag_sql <- function(dag, options) {
   ci <- ci + 1L; chunks[[ci]] <- emit_codesets(dag, options)
 
   # 3. Domain filtered tables
-  ci <- ci + 1L; chunks[[ci]] <- emit_domain_filtered(dag$used_tables, cdm_schema, options)
+  ci <- ci + 1L; chunks[[ci]] <- emit_domain_filtered(dag$used_tables, cdm_schema, options, dag$unfiltered_tables)
 
   # 3b. ANALYZE hints for server DBs — helps query planner build statistics
   # on the domain-filtered tables and codesets before they're heavily scanned.
@@ -899,7 +920,7 @@ emit_preamble <- function(options) {
   c(
     "/*",
     "  Execution Graph Batch Script",
-    "  Generated by atlasCohortGenerator",
+    "  Generated by CohortDAG",
     "*/",
     "",
     "-- Staging tables",
@@ -998,7 +1019,7 @@ emit_codesets <- function(dag, options) {
 #' Emit domain filtered tables.
 #' Uses list accumulator to avoid O(n^2) vector growth.
 #' @noRd
-emit_domain_filtered <- function(used_tables, cdm_schema, options) {
+emit_domain_filtered <- function(used_tables, cdm_schema, options, unfiltered_tables = character(0)) {
   ac_tbl <- qualify_table("all_concepts", options)
   cdm_table_sql <- options$cdm_table_sql  # May be NULL (no CDM modifications)
   # Max: 1 (obs_period) + 7 (domain tables) = 8 chunks
@@ -1061,13 +1082,22 @@ emit_domain_filtered <- function(used_tables, cdm_schema, options) {
       select_clause <- "*"
     }
     ci <- ci + 1L
-    chunks[[ci]] <- c(
-      sprintf("DROP TABLE IF EXISTS %s;", ft),
-      sprintf(paste0("SELECT %s INTO %s FROM %s WHERE %s IN ",
-                     "(SELECT concept_id FROM %s) OR %s IN ",
-                     "(SELECT concept_id FROM %s);"),
-              select_clause, ft, tbl_src, std_ref, ac_tbl, src_ref, ac_tbl),
-      "")
+    # If any criteria references this table without a CodesetId, we must
+    # copy the full table — concept filtering would drop needed rows.
+    if (dc$table %in% unfiltered_tables) {
+      chunks[[ci]] <- c(
+        sprintf("DROP TABLE IF EXISTS %s;", ft),
+        sprintf("SELECT %s INTO %s FROM %s;", select_clause, ft, tbl_src),
+        "")
+    } else {
+      chunks[[ci]] <- c(
+        sprintf("DROP TABLE IF EXISTS %s;", ft),
+        sprintf(paste0("SELECT %s INTO %s FROM %s WHERE %s IN ",
+                       "(SELECT concept_id FROM %s) OR %s IN ",
+                       "(SELECT concept_id FROM %s);"),
+                select_clause, ft, tbl_src, std_ref, ac_tbl, src_ref, ac_tbl),
+        "")
+    }
   }
   if (ci == 0L) return(character(0))
   unlist(chunks[seq_len(ci)])
@@ -1208,12 +1238,16 @@ emit_qualified_events <- function(node, dag, options) {
   }
 
   q_sort <- def$q_sort %||% "ASC"
+  q_limit <- def$q_limit %||% "All"
 
-  # NOTE: CirceR computes ordinal in #qualified_events but does NOT filter on it.
-  # The QualifiedLimit is NOT applied here — it is only used to compute row order.
-  # Filtering happens downstream (ExpressionLimit in included_events, or first_ends
-  # in final_cohort). Applying WHERE QE.ordinal = 1 here was incorrect and caused
-  # exactly 1 record per person.
+  # Apply QualifiedLimit filter: when "First" or "Last", keep only the first/last
+  # qualified event per person (WHERE QE.ordinal = 1). This matches CirceR behavior
+  # which applies the filter BEFORE inclusion rules are evaluated.
+  qualified_limit_filter <- if (!identical(toupper(q_limit), "ALL")) {
+    "\nWHERE QE.ordinal = 1"
+  } else {
+    ""
+  }
 
   tbl <- qualify_table(node$temp_table, options)
   use_view <- isTRUE(node$is_view)
@@ -1227,7 +1261,7 @@ emit_qualified_events <- function(node, dag, options) {
     "row_number() over (partition by pe.person_id order by pe.start_date ", q_sort, ", pe.event_id) as ordinal, ",
     "cast(pe.visit_occurrence_id as bigint) as visit_occurrence_id\n",
     "  from ", pe_table, " pe", add_criteria_join, "\n",
-    ") QE;"
+    ") QE", qualified_limit_filter, ";"
   )
 }
 
@@ -1608,7 +1642,7 @@ emit_final_cohort <- function(node, dag, options) {
     "DATEADD(day,-1 * ", era_pad, ", max(end_date)) as end_date\n",
     "  from (\n",
     "    select person_id, start_date, end_date, ",
-    "sum(is_start) over (partition by person_id order by start_date rows unbounded preceding) group_idx\n",
+    "sum(is_start) over (partition by person_id order by start_date, is_start desc rows unbounded preceding) group_idx\n",
     "    from (\n",
     "      select person_id, start_date, end_date,\n",
     "        case when max(end_date) over (partition by person_id order by start_date rows between unbounded preceding and 1 preceding) >= start_date then 0 else 1 end is_start\n",

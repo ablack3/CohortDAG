@@ -650,8 +650,10 @@ build_observation_period_sql <- function(criteria, cdm_schema = "@cdm_database_s
   udp <- criteria$UserDefinedPeriod %||% criteria$userDefinedPeriod
   start_expr <- "@startDateExpression"
   end_expr <- "@endDateExpression"
-  if (!is.null(udp) && !is.null(udp$startDate)) start_expr <- date_string_to_sql(udp$startDate)
-  if (!is.null(udp) && !is.null(udp$endDate)) end_expr <- date_string_to_sql(udp$endDate)
+  udp_start <- udp$startDate %||% udp$StartDate
+  udp_end <- udp$endDate %||% udp$EndDate
+  if (!is.null(udp) && !is.null(udp_start)) start_expr <- date_string_to_sql(udp_start)
+  if (!is.null(udp) && !is.null(udp_end)) end_expr <- date_string_to_sql(udp_end)
   first <- criteria$First %||% criteria$first %||% FALSE
   where_parts <- if (first) "C.ordinal = 1" else character(0)
   where_clause <- if (length(where_parts) > 0) paste0("WHERE ", where_parts) else ""

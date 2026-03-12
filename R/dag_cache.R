@@ -286,7 +286,7 @@ emit_dag_sql_cached <- function(dag, options, con, schema) {
   ci <- ci + 1L; chunks[[ci]] <- emit_codesets(dag, options)
 
   # 3. Domain filtered tables -- always emitted (ephemeral, not cached)
-  ci <- ci + 1L; chunks[[ci]] <- emit_domain_filtered(dag$used_tables, cdm_schema, options)
+  ci <- ci + 1L; chunks[[ci]] <- emit_domain_filtered(dag$used_tables, cdm_schema, options, dag$unfiltered_tables)
 
   # 4. Set sql_context for circe builders
 
