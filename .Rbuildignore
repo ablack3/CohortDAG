@@ -1,0 +1,7 @@
+^_archive$
+^\.Rproj\.user$
+^\.DS_Store$
+^\.claude$
+^\.github$
+^.*\.Rproj$
+^extras$
