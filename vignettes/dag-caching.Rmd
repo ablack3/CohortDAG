@@ -21,7 +21,7 @@ and re-run.  Without caching, the entire pipeline re-executes from scratch:
 concept set expansion, primary events, qualified events, inclusion rules, and
 final cohort construction -- even for the parts that haven't changed.
 
-`atlasCohortGenerator` implements **incremental DAG caching**: a system that
+`CohortDAG` implements **incremental DAG caching**: a system that
 persists intermediate computation tables in the database and skips recomputation
 of unchanged nodes.  This is the same principle behind build systems like Make
 and Bazel -- content-addressable caching with automatic invalidation via

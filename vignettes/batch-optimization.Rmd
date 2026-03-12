@@ -23,7 +23,7 @@ events, and writing results. This works, but it repeats expensive database
 operations (vocabulary joins, full-table scans, result-table I/O) once per
 cohort.
 
-`atlasCohortGenerator` implements a **DAG-based batch optimizer** that
+`CohortDAG` implements a **DAG-based batch optimizer** that
 reorganizes a set of cohort SQL scripts into a single execution plan with
 shared intermediate stages. The optimizer produces **semantically identical
 results** to the one-at-a-time approach while eliminating redundant work.
@@ -260,7 +260,7 @@ Several additional safety checks prevent silent divergence:
   `@`-parameters that survive rewriting (except known-safe ones like
   `@vocabulary_database_schema`)
 - **`force_full_path` option**: Setting
-  `options(atlasCohortGenerator.force_full_path = TRUE)` disables Phase 1
+  `options(CohortDAG.force_full_path = TRUE)` disables Phase 1
   entirely and routes all cohorts through the full script path, useful for
   debugging
 
@@ -344,7 +344,7 @@ never produces slower results than the one-at-a-time approach.
 ### Single Cohort (No Optimization)
 
 ```r
-library(atlasCohortGenerator)
+library(CohortDAG)
 
 # Generate SQL for one cohort
 sql <- atlas_json_to_sql(
@@ -388,7 +388,7 @@ batch_sql <- atlas_json_to_sql_batch(
 
 ```r
 library(CDMConnector)
-library(atlasCohortGenerator)
+library(CohortDAG)
 
 cdm <- cdm_from_con(con, cdm_schema = "cdm", write_schema = "results")
 cohort_set <- readCohortSet("path/to/cohort/jsons/")
@@ -409,11 +409,11 @@ ok <- validate_batch_equivalence(cdm, cohort_set, name = "equiv_test")
 
 ```r
 # Dump the final batch SQL for inspection
-options(atlasCohortGenerator.debug_sql_file = "batch_debug.sql")
+options(CohortDAG.debug_sql_file = "batch_debug.sql")
 cdm <- generateCohortSet2(cdm, cohort_set, name = "debug_run")
 
 # Force all cohorts through the full (non-optimized) script path
-options(atlasCohortGenerator.force_full_path = TRUE)
+options(CohortDAG.force_full_path = TRUE)
 cdm <- generateCohortSet2(cdm, cohort_set, name = "full_path_run")
 ```
 
