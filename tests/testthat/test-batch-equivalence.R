@@ -29,9 +29,10 @@ test_that("batch produces same cohort rows as single-cohort on DuckDB", {
   skip_if_not_installed("duckdb")
   library(CDMConnector)
 
-  cohorts_dir <- system.file("cohorts", package = "CohortDAG", mustWork = TRUE)
+  cohorts_dir <- unzip_cohorts()
+  on.exit(unlink(cohorts_dir, recursive = TRUE), add = TRUE)
   cohort_files <- list.files(cohorts_dir, pattern = "\\.json$", full.names = TRUE)
-  if (length(cohort_files) < 2L) skip("Need at least 2 cohort JSONs in inst/cohorts")
+  if (length(cohort_files) < 2L) skip("Need at least 2 cohort JSONs")
 
   # Use first 2 cohorts for a quick test
   idx <- head(seq_along(cohort_files), 2L)

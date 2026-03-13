@@ -1,3 +1,31 @@
+#' Get the bundled cohort set
+#'
+#' Extracts the 3000+ cohort definitions shipped with CohortDAG from the
+#' bundled zip file and returns a cohort set data frame via
+#' \code{CDMConnector::readCohortSet}.
+#'
+#' @param n_max Maximum number of cohort definitions to return. Defaults to
+#'   \code{Inf} (all cohorts). Use a smaller value for quick testing.
+#' @return A cohort set data frame suitable for \code{generateCohortSet2}.
+#' @export
+getCohortSet <- function(n_max = Inf) {
+  zip_path <- system.file("cohorts.zip", package = "CohortDAG", mustWork = TRUE)
+  temp_dir <- tempfile("cohortdag_cohorts_")
+  dir.create(temp_dir, recursive = TRUE)
+  on.exit(unlink(temp_dir, recursive = TRUE), add = TRUE)
+
+  utils::unzip(zip_path, exdir = temp_dir)
+
+  if (is.finite(n_max)) {
+    all_files <- sort(list.files(temp_dir, pattern = "\\.json$", full.names = TRUE))
+    keep <- utils::head(all_files, n_max)
+    remove <- setdiff(all_files, keep)
+    if (length(remove) > 0L) file.remove(remove)
+  }
+
+  CDMConnector::readCohortSet(temp_dir)
+}
+
 #' Benchmark cohort generation: old vs new
 #'
 #' Runs both CDMConnector::generateCohortSet (old) and generateCohortSet2 (new)

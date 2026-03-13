@@ -152,16 +152,30 @@ compare_cohort_dfs <- function(df_old, df_new) {
   )
 }
 
-#' Load a small cohort set from inst/cohorts for platform tests.
+#' Unzip bundled cohorts to a temporary directory.
+#' Returns the path to the temp directory containing JSON files.
+#' Caller is responsible for cleanup (or use withr::defer).
+#' @noRd
+unzip_cohorts <- function() {
+  zip_path <- system.file("cohorts.zip", package = "CohortDAG")
+  if (!nzchar(zip_path) || !file.exists(zip_path)) {
+    # Fall back to source tree
+    zip_path <- file.path(testthat::test_path(), "..", "..", "inst", "cohorts.zip")
+  }
+  if (!file.exists(zip_path)) stop("Cannot find cohorts.zip")
+  temp_dir <- tempfile("cohortdag_test_cohorts_")
+  dir.create(temp_dir, recursive = TRUE)
+  utils::unzip(zip_path, exdir = temp_dir)
+  temp_dir
+}
+
+#' Load a small cohort set from the bundled zip for platform tests.
 #' @param n_max Maximum number of cohorts to load (default 2).
 #' @return A cohort set data frame.
 #' @noRd
 platform_test_cohort_set <- function(n_max = 2L) {
-  cohorts_dir <- system.file("cohorts", package = "CohortDAG")
-  if (!nzchar(cohorts_dir) || !dir.exists(cohorts_dir)) {
-    cohorts_dir <- file.path(testthat::test_path(), "..", "..", "inst", "cohorts")
-  }
-  if (!dir.exists(cohorts_dir)) stop("Cannot find cohorts directory")
+  cohorts_dir <- unzip_cohorts()
+  on.exit(unlink(cohorts_dir, recursive = TRUE), add = TRUE)
   preferred <- c("smoker.json", "aspirin_users.json", "cohort.json", "antidepressants.json")
   all_files <- list.files(cohorts_dir, pattern = "\\.json$", full.names = TRUE)
   available <- basename(all_files)

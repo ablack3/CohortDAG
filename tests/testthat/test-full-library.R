@@ -11,14 +11,9 @@ test_that("full cohort library: generateCohortSet2 matches generateCohortSet on 
   skip_if_not_installed("duckdb")
   library(CDMConnector)
 
-  # Try installed package first, then fall back to source tree
-
-  cohorts_dir <- system.file("cohorts", package = "CohortDAG")
-  if (!nzchar(cohorts_dir) || !dir.exists(cohorts_dir)) {
-    # Running from source tree (devtools::test or similar)
-    cohorts_dir <- file.path(testthat::test_path(), "..", "..", "inst", "cohorts")
-  }
-  if (!dir.exists(cohorts_dir)) skip("Cannot find cohorts directory")
+  # Unzip bundled cohorts
+  cohorts_dir <- unzip_cohorts()
+  on.exit(unlink(cohorts_dir, recursive = TRUE), add = TRUE)
   all_files  <- sort(list.files(cohorts_dir, pattern = "\\.json$", full.names = TRUE))
   n_total    <- length(all_files)
 

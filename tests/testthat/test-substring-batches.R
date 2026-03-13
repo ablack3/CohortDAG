@@ -5,7 +5,8 @@ test_that("substring-matched cohort batches generate correctly", {
   skip_if_not_installed("duckdb")
   library(CDMConnector)
 
-  cohorts_dir <- system.file("cohorts", package = "CohortDAG", mustWork = TRUE)
+  cohorts_dir <- unzip_cohorts()
+  on.exit(unlink(cohorts_dir, recursive = TRUE), add = TRUE)
   all_files <- list.files(cohorts_dir, pattern = "\\.json$")
   all_names <- tools::file_path_sans_ext(all_files)
 
