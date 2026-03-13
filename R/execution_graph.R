@@ -172,12 +172,16 @@ normalize_primary_events_for_hash <- function(def) {
 #' Key: (primary_events_hash, additional_criteria_hash, qualified_sort, qualified_limit)
 #' @noRd
 normalize_qualified_events_for_hash <- function(def) {
+  ac <- as.character(def$ac_hash %||% "")
+  has_ac <- nzchar(ac)
   list(
     t = "qe",
     pe_hash = as.character(def$pe_hash),
-    ac_hash = as.character(def$ac_hash %||% ""),
-    q_sort = toupper(def$q_sort %||% "ASC"),
-    q_limit = toupper(def$q_limit %||% "ALL")
+    ac_hash = ac,
+    # QualifiedLimit sort/limit only matter when additional criteria are present.
+    # When there are no additional criteria, CirceR ignores QualifiedLimit entirely.
+    q_sort = if (has_ac) toupper(def$q_sort %||% "ASC") else "ASC",
+    q_limit = if (has_ac) toupper(def$q_limit %||% "ALL") else "ALL"
   )
 }
 
@@ -1241,9 +1245,12 @@ emit_qualified_events <- function(node, dag, options) {
   q_limit <- def$q_limit %||% "All"
 
   # Apply QualifiedLimit filter: when "First" or "Last", keep only the first/last
-  # qualified event per person (WHERE QE.ordinal = 1). This matches CirceR behavior
-  # which applies the filter BEFORE inclusion rules are evaluated.
-  qualified_limit_filter <- if (!identical(toupper(q_limit), "ALL")) {
+  # qualified event per person (WHERE QE.ordinal = 1).
+  # IMPORTANT: CirceR only applies this filter when additionalCriteria is present.
+  # When there are no additional criteria, the QualifiedLimit is ignored and all
+  # primary events pass through regardless of the limit type.
+  has_additional_criteria <- !is.null(add_criteria) && !is_group_empty(add_criteria)
+  qualified_limit_filter <- if (has_additional_criteria && !identical(toupper(q_limit), "ALL")) {
     "\nWHERE QE.ordinal = 1"
   } else {
     ""
