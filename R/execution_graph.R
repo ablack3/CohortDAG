@@ -1455,7 +1455,7 @@ emit_cohort_exit <- function(node, dag, options) {
       era_subquery <- paste0(
         "select person_id, min(start_date) as era_start_date, DATEADD(day,-1 * ", gap_days, ", max(end_date)) as era_end_date\n",
         "  from (\n",
-        "    select person_id, start_date, end_date, sum(is_start) over (partition by person_id order by start_date rows unbounded preceding) group_idx\n",
+        "    select person_id, start_date, end_date, sum(is_start) over (partition by person_id order by start_date, is_start desc rows unbounded preceding) group_idx\n",
         "    from (\n",
         "      select person_id, start_date, end_date, \n",
         "        case when max(end_date) over (partition by person_id order by start_date rows between unbounded preceding and 1 preceding) >= start_date then 0 else 1 end is_start\n",

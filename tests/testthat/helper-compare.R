@@ -69,7 +69,7 @@ compare_cohort_dfs <- function(df_old, df_new) {
   # Keep only the standard cohort columns
   key_present <- key_cols[key_cols %in% names(df_old) & key_cols %in% names(df_new)]
   if (length(key_present) == 0L) {
-    stop("No common key columns found between '", name_old, "' and '", name_new, "'")
+    stop("No common key columns found between old and new cohort tables")
   }
   df_old <- df_old[, key_present, drop = FALSE]
   df_new <- df_new[, key_present, drop = FALSE]
