@@ -61,6 +61,86 @@ The benchmarking script records `time_old_sec`, `time_new_sec`, and
 `ratio_new_over_old` per database so you can measure the speedup on your own
 data and platforms.
 
+## Bundled tier-2 full-library benchmark
+
+The package also includes a heavier **tier-2** benchmark that exercises the
+bundled JSON cohort library end to end. This run:
+
+1. Unzips the packaged cohort JSON files.
+2. Splits the library into batches of `50` cohorts.
+3. Builds a synthetic CDM for each batch with
+   `CDMConnector::cdmFromCohortSet(n = 500)`.
+4. Runs both `CDMConnector::generateCohortSet()` and
+   `CohortDAG::generateCohortSet2()`.
+5. Compares the resulting cohort tables row by row and writes batch logs, timing
+   summaries, and mismatch details.
+
+This benchmark is implemented in
+`tests/testthat/test-full-library.R` and writes artifacts to
+`inst/benchmark-results/`.
+
+### Latest tier-2 run summary
+
+The latest full-library run in this repository was completed on **March 15,
+2026** using all bundled cohorts.
+
+```{r, echo = FALSE}
+tier2_summary <- data.frame(
+  metric = c(
+    "Cohorts tested",
+    "Batches run",
+    "Batches OK",
+    "Batches mismatch",
+    "Batches error",
+    "Overall accuracy",
+    "Old total time (sec)",
+    "New total time (sec)",
+    "Overall speedup (old/new)",
+    "Median batch speedup (old/new)",
+    "Rows old",
+    "Rows new"
+  ),
+  value = c(
+    "3179",
+    "64",
+    "54",
+    "9",
+    "1",
+    "99.68%",
+    "603.395",
+    "377.373",
+    "1.599x",
+    "2.012x",
+    "540315",
+    "540281"
+  ),
+  stringsAsFactors = FALSE
+)
+knitr::kable(tier2_summary, col.names = c("Metric", "Value"))
+```
+
+Interpretation:
+
+- `generateCohortSet2()` was faster overall: `377.373s` versus `603.395s`.
+- End-to-end parity is not complete yet: `3119` of `3129` comparable cohorts
+  matched exactly, for `99.68%` accuracy.
+- One batch did not compare because `cdmFromCohortSet()` failed for both methods
+  with `9 observations outside observation period`.
+
+The remaining mismatches in that run were logged in
+`inst/benchmark-results/tier2_mismatch_details_latest.csv` and came from these
+batches:
+
+- `17`
+- `18`
+- `23`
+- `26`
+- `27`
+- `38`
+- `47`
+- `58`
+- `61`
+
 ## How to run the benchmark
 
 ### Prerequisites
@@ -70,6 +150,49 @@ data and platforms.
 - One or more **live CDM connections** (e.g. Postgres, Redshift, Snowflake, Spark,
   SQL Server) as CDM reference objects.
 - A **cohort set** (e.g. from `CDMConnector::readCohortSet("path/to/cohorts")`).
+
+### Bundled full-library tier-2 benchmark
+
+To reproduce the packaged full-library benchmark, run the tier-2 test directly:
+
+```sh
+Rscript -e 'pkgload::load_all(".", quiet = TRUE); Sys.setenv(RUN_TIER_2 = "true"); testthat::test_file("tests/testthat/test-full-library.R")'
+```
+
+The default behavior matches the current repository benchmark:
+
+- `TIER2_BATCH_SIZE=50`
+- `TIER2_N_SUBJECTS=500`
+- `TIER2_DISABLE_COHD=true`
+- `TIER2_N_CORES=min(4, detectCores(logical = FALSE))`
+- output written to `inst/benchmark-results/`
+
+Useful overrides:
+
+- `TIER2_BATCH_START` and `TIER2_BATCH_END`: rerun only a slice of the library.
+- `TIER2_MAX_COHORTS`: limit the number of bundled JSON files loaded.
+- `TIER2_RESULTS_DIR`: write results somewhere other than
+  `inst/benchmark-results/`.
+- `TIER2_SEED_BASE`: change the synthetic-CDM seed sequence.
+- `TIER2_N_CORES`: parallelize across batches.
+
+Example: rerun only batches `17` through `23` into a temporary results folder.
+
+```sh
+TIER2_BATCH_START=17 \
+TIER2_BATCH_END=23 \
+TIER2_RESULTS_DIR=/tmp/cohortdag-tier2 \
+Rscript -e 'pkgload::load_all(".", quiet = TRUE); Sys.setenv(RUN_TIER_2 = "true"); testthat::test_file("tests/testthat/test-full-library.R")'
+```
+
+The tier-2 harness writes four main artifacts:
+
+- `tier2_summary_<timestamp>.csv`: overall totals, speed, and accuracy.
+- `tier2_batch_results_<timestamp>.csv`: one row per batch with timings and
+  accuracy.
+- `tier2_mismatch_details_<timestamp>.csv`: one row per mismatched cohort with
+  row-count deltas.
+- `tier2_logs_<timestamp>/batch_XXX.log`: per-batch progress and error logs.
 
 ### Single database
 
