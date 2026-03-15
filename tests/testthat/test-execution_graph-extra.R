@@ -197,10 +197,23 @@ test_that("normalize_primary_events_for_hash normalizes defaults", {
   def <- list(criteria_hashes = c("b", "a"), prior_days = 365, post_days = 0)
   result <- CohortDAG:::normalize_primary_events_for_hash(def)
   expect_equal(result$t, "pe")
-  expect_equal(result$criteria_hashes, c("a", "b"))
+  expect_equal(result$criteria_hashes, c("b", "a"))
   expect_equal(result$prior_days, 365L)
   expect_equal(result$primary_limit_type, "ALL")
   expect_equal(result$event_sort, "ASC")
+})
+
+test_that("normalize_criterion_for_hash captures non-whitelisted primary filters", {
+  criterion_a <- list(Measurement = list(CodesetId = 0, MeasurementTypeExclude = FALSE))
+  criterion_b <- list(Measurement = list(CodesetId = 0, MeasurementTypeExclude = TRUE))
+  cs_map <- list(lookup = list("1:0" = "hash_std"))
+
+  result_a <- CohortDAG:::normalize_criterion_for_hash(criterion_a, cs_map, 1)
+  result_b <- CohortDAG:::normalize_criterion_for_hash(criterion_b, cs_map, 1)
+
+  expect_true(!is.null(result_a$filter_hash))
+  expect_true(!is.null(result_b$filter_hash))
+  expect_false(identical(result_a$filter_hash, result_b$filter_hash))
 })
 
 # --- normalize_qualified_events_for_hash ---
@@ -210,6 +223,20 @@ test_that("normalize_qualified_events_for_hash works", {
   result <- CohortDAG:::normalize_qualified_events_for_hash(def)
   expect_equal(result$t, "qe")
   expect_equal(result$pe_hash, "abc123")
+  expect_equal(result$q_sort, "DESC")
+  expect_equal(result$q_limit, "FIRST")
+})
+
+test_that("normalize_qualified_events_for_hash ignores QualifiedLimit without additional criteria", {
+  def <- list(pe_hash = "abc123", ac_hash = "", q_sort = "desc", q_limit = "First")
+  result <- CohortDAG:::normalize_qualified_events_for_hash(def)
+  expect_equal(result$q_sort, "ASC")
+  expect_equal(result$q_limit, "ALL")
+})
+
+test_that("normalize_qualified_events_for_hash preserves QualifiedLimit for single primary criteria", {
+  def <- list(pe_hash = "abc123", ac_hash = "", q_sort = "desc", q_limit = "First", scoped_single_primary = TRUE)
+  result <- CohortDAG:::normalize_qualified_events_for_hash(def)
   expect_equal(result$q_sort, "DESC")
   expect_equal(result$q_limit, "FIRST")
 })
@@ -295,11 +322,11 @@ test_that("normalize_inclusion_rule_for_hash works", {
 
 # --- normalize_included_events_for_hash ---
 
-test_that("normalize_included_events_for_hash sorts ir_hashes", {
+test_that("normalize_included_events_for_hash preserves ir_hash order", {
   def <- list(qe_hash = "qe1", ir_hashes = c("ir2", "ir1"), el_sort = "asc", el_type = "all")
   result <- CohortDAG:::normalize_included_events_for_hash(def)
   expect_equal(result$t, "ie")
-  expect_equal(result$ir_hashes, c("ir1", "ir2"))
+  expect_equal(result$ir_hashes, c("ir2", "ir1"))
   expect_equal(result$el_sort, "ASC")
   expect_equal(result$el_type, "ALL")
 })
@@ -793,6 +820,23 @@ test_that("emit_qualified_events generates SQL", {
   expect_true(grepl("row_number", result, ignore.case = TRUE))
 })
 
+test_that("emit_qualified_events matches Circe's event_id tie-break", {
+  cohort <- make_simple_cohort()
+  cohort$QualifiedLimit <- list(Type = "First")
+  cohort$ExpressionLimit <- list(Type = "First")
+  dag <- CohortDAG:::build_execution_dag(list(cohort), 1L, list())
+  options <- list(cdm_schema = "cdm", results_schema = "results", table_prefix = "atlas_test_")
+
+  qe_node <- NULL
+  for (n in dag$nodes) {
+    if (n$type == "qualified_events") { qe_node <- n; break }
+  }
+  result <- CohortDAG:::emit_qualified_events(qe_node, dag, options)
+
+  expect_true(grepl("order by pe.start_date ASC, pe.event_id\\) as ordinal", result, ignore.case = TRUE))
+  expect_true(grepl("WHERE QE.ordinal = 1", result, fixed = TRUE))
+})
+
 test_that("emit_qualified_events with additional criteria", {
   cohort <- make_simple_cohort()
   cohort$AdditionalCriteria <- list(
@@ -890,6 +934,7 @@ test_that("emit_included_events with ExpressionLimit First", {
 
   result <- CohortDAG:::emit_included_events(ie_node, dag, options)
   expect_true(grepl("ordinal = 1", result))
+  expect_true(grepl("order by start_date ASC, end_date DESC, event_id\\) as ordinal", result, ignore.case = TRUE))
 })
 
 # --- emit_inclusion_rule ---
@@ -1075,6 +1120,10 @@ test_that("emit_final_cohort with era_pad", {
   }
   result <- CohortDAG:::emit_final_cohort(fc_node, dag, options)
   expect_true(grepl("30", result))
+  expect_false(grepl("cohort_rows_deduped", result, fixed = TRUE))
+  expect_true(grepl("from cohort_rows", result, ignore.case = TRUE))
+  expect_true(grepl("DATEADD\\(day,30,end_date\\) as end_date", result))
+  expect_true(grepl("\\) CR", result))
 })
 
 # --- emit_finalize ---
@@ -1423,6 +1472,7 @@ test_that("emit_included_events with ExpressionLimit First", {
 
   result <- CohortDAG:::emit_included_events(ie_node, dag, options)
   expect_true(grepl("ordinal = 1", result))
+  expect_true(grepl("order by start_date ASC, end_date DESC, event_id\\) as ordinal", result, ignore.case = TRUE))
 })
 
 # --- emit_inclusion_rule ---

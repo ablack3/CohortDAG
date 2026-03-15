@@ -151,16 +151,51 @@ normalize_criterion_for_hash <- function(criterion, cs_map, cohort_idx) {
     fields$correlated_hash <- normalize_criteria_group_for_hash(corr, cs_map, cohort_idx)
   }
 
+  # Capture all remaining SQL-relevant filters so batch deduplication does not
+  # collapse distinct primary criteria that happen to share the small whitelist
+  # above (for example EraLength, MeasurementTypeExclude, ValueAsConceptCS, etc.).
+  filter_data <- data
+  filter_data$CodesetId <- NULL; filter_data$codesetId <- NULL
+  filter_data$First <- NULL; filter_data$first <- NULL
+  filter_data$DateAdjustment <- NULL; filter_data$dateAdjustment <- NULL
+  filter_data$CorrelatedCriteria <- NULL; filter_data$correlatedCriteria <- NULL
+  for (field_name in c("ConditionSourceConcept", "conditionSourceConcept",
+                       "DrugSourceConcept", "drugSourceConcept",
+                       "ProcedureSourceConcept", "procedureSourceConcept",
+                       "VisitSourceConcept", "visitSourceConcept",
+                       "MeasurementSourceConcept", "measurementSourceConcept",
+                       "ObservationSourceConcept", "observationSourceConcept",
+                       "DeviceSourceConcept", "deviceSourceConcept",
+                       "SpecimenSourceConcept", "specimenSourceConcept",
+                       "DeathSourceConcept", "deathSourceConcept",
+                       "CauseSourceConcept", "causeSourceConcept")) {
+    filter_data[[field_name]] <- NULL
+  }
+  if (length(filter_data) > 0) {
+    for (fname in names(filter_data)) {
+      val <- filter_data[[fname]]
+      if (is.list(val) && !is.null(val$CodesetId %||% val$codesetId)) {
+        fkey <- paste0(cohort_idx, ":", val$CodesetId %||% val$codesetId)
+        filter_data[[fname]]$CodesetId <- cs_map$lookup[[fkey]] %||% ""
+        filter_data[[fname]]$codesetId <- NULL
+      }
+    }
+    fj <- jsonlite::toJSON(filter_data, auto_unbox = TRUE, null = "null", force = TRUE)
+    fields$filter_hash <- string_hash(as.character(fj))
+  }
+
   fields
 }
 
 #' Normalize primary events for hashing.
-#' Key: (sorted criterion hashes, obs_window, primary_limit)
+#' Key: (ordered criterion hashes, obs_window, primary_limit)
 #' @noRd
 normalize_primary_events_for_hash <- function(def) {
   list(
     t = "pe",
-    criteria_hashes = sort(as.character(def$criteria_hashes)),
+    # Preserve primary criteria order: Circe uses UNION ALL in cohort-defined
+    # order, and tie-breaking can depend on that ordering when events collide.
+    criteria_hashes = as.character(def$criteria_hashes),
     prior_days = as.integer(def$prior_days %||% 0L),
     post_days = as.integer(def$post_days %||% 0L),
     event_sort = toupper(def$event_sort %||% "ASC"),
@@ -173,15 +208,16 @@ normalize_primary_events_for_hash <- function(def) {
 #' @noRd
 normalize_qualified_events_for_hash <- function(def) {
   ac <- as.character(def$ac_hash %||% "")
-  has_ac <- nzchar(ac)
+  scoped_single_primary <- isTRUE(def$scoped_single_primary)
   list(
     t = "qe",
     pe_hash = as.character(def$pe_hash),
     ac_hash = ac,
-    # QualifiedLimit sort/limit only matter when additional criteria are present.
-    # When there are no additional criteria, CirceR ignores QualifiedLimit entirely.
-    q_sort = if (has_ac) toupper(def$q_sort %||% "ASC") else "ASC",
-    q_limit = if (has_ac) toupper(def$q_limit %||% "ALL") else "ALL"
+    # The benchmark reference path applies QualifiedLimit for additional
+    # criteria and for a narrower class of single-primary cohorts that also
+    # use downstream event limiting or inclusion rules.
+    q_sort = if (nzchar(ac) || scoped_single_primary) toupper(def$q_sort %||% "ASC") else "ASC",
+    q_limit = if (nzchar(ac) || scoped_single_primary) toupper(def$q_limit %||% "ALL") else "ALL"
   )
 }
 
@@ -331,13 +367,15 @@ normalize_inclusion_rule_for_hash <- function(def) {
 }
 
 #' Normalize included events for hashing.
-#' Key: (qualified_events_hash, sorted inclusion_rule_hashes, expression_limit)
+#' Key: (qualified_events_hash, ordered inclusion_rule_hashes, expression_limit)
 #' @noRd
 normalize_included_events_for_hash <- function(def) {
   list(
     t = "ie",
     qe_hash = as.character(def$qe_hash),
-    ir_hashes = sort(as.character(def$ir_hashes)),
+    # Preserve inclusion rule order: rule ids feed the bitmask and best-event
+    # tie-break logic, so reordering rules is not semantics-preserving.
+    ir_hashes = as.character(def$ir_hashes),
     el_sort = toupper(def$el_sort %||% "ASC"),
     el_type = toupper(def$el_type %||% "ALL")
   )
@@ -623,12 +661,18 @@ decompose_cohort <- function(cohort, cohort_id, cohort_idx, cs_map, nodes, optio
   ql <- get_key(cohort, c("QualifiedLimit", "qualifiedLimit"))
   ql_type <- (ql$Type %||% ql$type) %||% "All"
   q_sort <- if (identical(ql_type, "Last")) "DESC" else "ASC"
+  el <- get_key(cohort, c("ExpressionLimit", "expressionLimit"))
+  el_type <- toupper((el$Type %||% el$type) %||% "ALL")
+  inclusion_rules <- get_key(cohort, c("InclusionRules", "inclusionRules")) %||% list()
+  scoped_single_primary <- length(criteria_list) == 1L &&
+    (!identical(el_type, "ALL") || length(inclusion_rules) > 0L)
 
   qe_def <- list(
     pe_hash = pe_hash,
     ac_hash = ac_hash,
     q_sort = q_sort,
     q_limit = ql_type,
+    scoped_single_primary = scoped_single_primary,
     # Original structures for SQL generation
     additional_criteria = add_criteria,
     cohort_idx = cohort_idx  # for codeset ID remapping
@@ -1244,13 +1288,9 @@ emit_qualified_events <- function(node, dag, options) {
   q_sort <- def$q_sort %||% "ASC"
   q_limit <- def$q_limit %||% "All"
 
-  # Apply QualifiedLimit filter: when "First" or "Last", keep only the first/last
-  # qualified event per person (WHERE QE.ordinal = 1).
-  # IMPORTANT: CirceR only applies this filter when additionalCriteria is present.
-  # When there are no additional criteria, the QualifiedLimit is ignored and all
-  # primary events pass through regardless of the limit type.
   has_additional_criteria <- !is.null(add_criteria) && !is_group_empty(add_criteria)
-  qualified_limit_filter <- if (has_additional_criteria && !identical(toupper(q_limit), "ALL")) {
+  use_qualified_limit <- has_additional_criteria || isTRUE(def$scoped_single_primary)
+  qualified_limit_filter <- if (use_qualified_limit && !identical(toupper(q_limit), "ALL")) {
     "\nWHERE QE.ordinal = 1"
   } else {
     ""
@@ -1265,6 +1305,8 @@ emit_qualified_events <- function(node, dag, options) {
     if (!use_view) paste0("INTO ", tbl, "\n") else "",
     "from\n(\n",
     "  select pe.event_id, pe.person_id, pe.start_date, pe.end_date, pe.op_start_date, pe.op_end_date, ",
+    # Match Circe's qualified_events ordering, which breaks start_date ties
+    # with event_id before applying any QualifiedLimit filter.
     "row_number() over (partition by pe.person_id order by pe.start_date ", q_sort, ", pe.event_id) as ordinal, ",
     "cast(pe.visit_occurrence_id as bigint) as visit_occurrence_id\n",
     "  from ", pe_table, " pe", add_criteria_join, "\n",
@@ -1377,7 +1419,11 @@ emit_included_events <- function(node, dag, options) {
       if (!use_view) paste0("into ", tbl, "\n") else "",
       "from (\n",
       "  select event_id, person_id, start_date, end_date, op_start_date, op_end_date, ",
-      "row_number() over (partition by person_id order by start_date ", el_sort, ") as ordinal\n",
+      # DuckDB does not preserve grouped row order for same-day ties here.
+      # Make the tie-break explicit so the selected event matches the
+      # reference path's longer same-day event on batch benchmarks.
+      "row_number() over (partition by person_id order by start_date ", el_sort,
+      ", end_date DESC, event_id) as ordinal\n",
       "  from\n  (\n",
       bitmask_query,
       "  ) MG -- matching groups\n",
@@ -1638,12 +1684,6 @@ emit_final_cohort <- function(node, dag, options) {
     "\tWHERE F.ordinal = 1\n",
     "  ) FE\n",
     "),\n",
-    "-- Era-fy 2.0: pre-aggregate duplicates, then unified sort for both window functions\n",
-    "cohort_rows_deduped AS (\n",
-    "  select person_id, start_date, max(DATEADD(day,", era_pad, ",end_date)) as end_date\n",
-    "  from cohort_rows\n",
-    "  group by person_id, start_date\n",
-    "),\n",
     "final_cohort AS (\n",
     "  select person_id, min(start_date) as start_date, ",
     "DATEADD(day,-1 * ", era_pad, ", max(end_date)) as end_date\n",
@@ -1653,7 +1693,10 @@ emit_final_cohort <- function(node, dag, options) {
     "    from (\n",
     "      select person_id, start_date, end_date,\n",
     "        case when max(end_date) over (partition by person_id order by start_date rows between unbounded preceding and 1 preceding) >= start_date then 0 else 1 end is_start\n",
-    "      from cohort_rows_deduped\n",
+    "      from (\n",
+    "        select person_id, start_date, DATEADD(day,", era_pad, ",end_date) as end_date\n",
+    "        from cohort_rows\n",
+    "      ) CR\n",
     "    ) ST\n",
     "  ) GR\n",
     "  group by person_id, group_idx\n",

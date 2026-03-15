@@ -118,6 +118,13 @@ test_that("build_drug_exposure_sql handles RouteConcept", {
   expect_true(grepl("route_concept_id", result))
 })
 
+test_that("build_drug_exposure_sql applies OccurrenceEndDate to start_date", {
+  criteria <- list(CodesetId = 0, OccurrenceEndDate = list(Op = "lt", Value = "2022-01-01"))
+  result <- CohortDAG:::build_drug_exposure_sql(criteria)
+  expect_true(grepl("C.start_date < DATEFROMPARTS\\(2022, 1, 1\\)", result))
+  expect_false(grepl("C.end_date < DATEFROMPARTS\\(2022, 1, 1\\)", result))
+})
+
 # --- build_visit_occurrence_sql ---
 
 test_that("build_visit_occurrence_sql generates valid SQL", {

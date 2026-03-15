@@ -710,7 +710,10 @@ build_drug_exposure_sql <- function(criteria, cdm_schema = "@cdm_database_schema
   osd <- criteria$OccurrenceStartDate %||% criteria$occurrenceStartDate
   oed <- criteria$OccurrenceEndDate %||% criteria$occurrenceEndDate
   if (!is.null(osd)) { cl <- build_date_range_clause("C.start_date", osd); if (!is.null(cl)) where_parts <- c(where_parts, cl) }
-  if (!is.null(oed)) { cl <- build_date_range_clause("C.end_date", oed); if (!is.null(cl)) where_parts <- c(where_parts, cl) }
+  # Circe applies DrugExposure occurrence end-date filters to the exposure start
+  # date in generated SQL. Preserve that behavior for parity even though the
+  # field name suggests end_date semantics.
+  if (!is.null(oed)) { cl <- build_date_range_clause("C.start_date", oed); if (!is.null(cl)) where_parts <- c(where_parts, cl) }
   # DrugType
   dte <- criteria$DrugTypeExclude %||% criteria$drugTypeExclude %||% FALSE
   if (length(dt) > 0) {
@@ -1212,11 +1215,34 @@ build_condition_era_sql <- function(criteria, cdm_schema = "@cdm_database_schema
   codeset_clause <- get_codeset_where_clause(criteria$CodesetId %||% criteria$codesetId, "ce.condition_concept_id")
   first <- criteria$First %||% criteria$first %||% FALSE
   ordinal <- if (first) ", row_number() over (PARTITION BY ce.person_id ORDER BY ce.condition_era_start_date) as ordinal" else ""
-  select_clause <- "ce.person_id, ce.condition_era_id, ce.condition_concept_id, ce.condition_era_start_date as start_date, ce.condition_era_end_date as end_date"
+  select_clause <- "ce.person_id, ce.condition_era_id, ce.condition_concept_id, ce.condition_occurrence_count, ce.condition_era_start_date as start_date, ce.condition_era_end_date as end_date"
+  join_clause <- ""
   where_parts <- character(0)
   if (first) where_parts <- c(where_parts, "C.ordinal = 1")
+  # EraStartDate / OccurrenceStartDate
+  osd <- criteria$EraStartDate %||% criteria$eraStartDate %||% criteria$OccurrenceStartDate %||% criteria$occurrenceStartDate
+  if (!is.null(osd)) { cl <- build_date_range_clause("C.start_date", osd); if (!is.null(cl)) where_parts <- c(where_parts, cl) }
+  # EraEndDate / OccurrenceEndDate
+  oed <- criteria$EraEndDate %||% criteria$eraEndDate %||% criteria$OccurrenceEndDate %||% criteria$occurrenceEndDate
+  if (!is.null(oed)) { cl <- build_date_range_clause("C.end_date", oed); if (!is.null(cl)) where_parts <- c(where_parts, cl) }
+  # EraLength
+  el <- criteria$EraLength %||% criteria$eraLength
+  if (!is.null(el)) { cl <- build_numeric_range_clause("DATEDIFF(d,C.start_date, C.end_date)", el); if (!is.null(cl)) where_parts <- c(where_parts, cl) }
+  # ConditionOccurrenceCount
+  coc <- criteria$ConditionOccurrenceCount %||% criteria$conditionOccurrenceCount
+  if (!is.null(coc)) { cl <- build_numeric_range_clause("C.condition_occurrence_count", coc); if (!is.null(cl)) where_parts <- c(where_parts, cl) }
+  # Age, Gender
+  age <- criteria$AgeAtStart %||% criteria$ageAtStart %||% criteria$Age %||% criteria$age
+  gender <- criteria$Gender %||% criteria$gender
+  gcs <- criteria$GenderCS %||% criteria$genderCS
+  if (!is.null(age) || length(gender) > 0 || (!is.null(gcs) && !is.null(gcs$CodesetId))) {
+    join_clause <- paste0("JOIN ", cdm_schema, ".PERSON P on C.person_id = P.person_id")
+    if (!is.null(age)) { cl <- build_numeric_range_clause("YEAR(C.start_date) - P.year_of_birth", age); if (!is.null(cl)) where_parts <- c(where_parts, cl) }
+    if (length(gender) > 0) { ids <- get_concept_ids(gender); if (length(ids) > 0) where_parts <- c(where_parts, paste0("P.gender_concept_id in (", paste(ids, collapse = ","), ")")) }
+    if (!is.null(gcs) && !is.null(gcs$CodesetId)) where_parts <- c(where_parts, get_codeset_in_expression(gcs$CodesetId, "P.gender_concept_id", gcs$IsExclusion %||% FALSE))
+  }
   where_clause <- if (length(where_parts) > 0) paste0("WHERE ", paste(where_parts, collapse = " AND ")) else ""
-  paste0("-- Begin Condition Era Criteria\nSELECT C.person_id, C.condition_era_id as event_id, C.start_date, C.end_date, CAST(NULL as bigint) as visit_occurrence_id, C.start_date as sort_date\nFROM \n(\n  SELECT ", select_clause, ordinal, "\n  FROM ", cdm_schema, ".CONDITION_ERA ce\n  ", codeset_clause, "\n) C\n", where_clause, "\n-- End Condition Era Criteria")
+  paste0("-- Begin Condition Era Criteria\nSELECT C.person_id, C.condition_era_id as event_id, C.start_date, C.end_date, CAST(NULL as bigint) as visit_occurrence_id, C.start_date as sort_date\nFROM \n(\n  SELECT ", select_clause, ordinal, "\n  FROM ", cdm_schema, ".CONDITION_ERA ce\n  ", codeset_clause, "\n) C\n", join_clause, "\n", where_clause, "\n-- End Condition Era Criteria")
 }
 
 #' Build Drug Era SQL
@@ -1229,10 +1255,36 @@ build_drug_era_sql <- function(criteria, cdm_schema = "@cdm_database_schema") {
   first <- criteria$First %||% criteria$first %||% FALSE
   ordinal <- if (first) ", row_number() over (PARTITION BY de.person_id ORDER BY de.drug_era_start_date) as ordinal" else ""
   select_clause <- "de.person_id, de.drug_era_id, de.drug_concept_id, de.drug_exposure_count, de.gap_days, de.drug_era_start_date as start_date, de.drug_era_end_date as end_date"
+  join_clause <- ""
   where_parts <- character(0)
   if (first) where_parts <- c(where_parts, "C.ordinal = 1")
+  # EraStartDate / OccurrenceStartDate
+  osd <- criteria$EraStartDate %||% criteria$eraStartDate %||% criteria$OccurrenceStartDate %||% criteria$occurrenceStartDate
+  if (!is.null(osd)) { cl <- build_date_range_clause("C.start_date", osd); if (!is.null(cl)) where_parts <- c(where_parts, cl) }
+  # EraEndDate / OccurrenceEndDate
+  oed <- criteria$EraEndDate %||% criteria$eraEndDate %||% criteria$OccurrenceEndDate %||% criteria$occurrenceEndDate
+  if (!is.null(oed)) { cl <- build_date_range_clause("C.end_date", oed); if (!is.null(cl)) where_parts <- c(where_parts, cl) }
+  # EraLength
+  el <- criteria$EraLength %||% criteria$eraLength
+  if (!is.null(el)) { cl <- build_numeric_range_clause("DATEDIFF(d,C.start_date, C.end_date)", el); if (!is.null(cl)) where_parts <- c(where_parts, cl) }
+  # GapDays
+  gd <- criteria$GapDays %||% criteria$gapDays
+  if (!is.null(gd)) { cl <- build_numeric_range_clause("C.gap_days", gd); if (!is.null(cl)) where_parts <- c(where_parts, cl) }
+  # DrugExposureCount
+  dec <- criteria$DrugExposureCount %||% criteria$drugExposureCount
+  if (!is.null(dec)) { cl <- build_numeric_range_clause("C.drug_exposure_count", dec); if (!is.null(cl)) where_parts <- c(where_parts, cl) }
+  # Age, Gender
+  age <- criteria$AgeAtStart %||% criteria$ageAtStart %||% criteria$Age %||% criteria$age
+  gender <- criteria$Gender %||% criteria$gender
+  gcs <- criteria$GenderCS %||% criteria$genderCS
+  if (!is.null(age) || length(gender) > 0 || (!is.null(gcs) && !is.null(gcs$CodesetId))) {
+    join_clause <- paste0("JOIN ", cdm_schema, ".PERSON P on C.person_id = P.person_id")
+    if (!is.null(age)) { cl <- build_numeric_range_clause("YEAR(C.start_date) - P.year_of_birth", age); if (!is.null(cl)) where_parts <- c(where_parts, cl) }
+    if (length(gender) > 0) { ids <- get_concept_ids(gender); if (length(ids) > 0) where_parts <- c(where_parts, paste0("P.gender_concept_id in (", paste(ids, collapse = ","), ")")) }
+    if (!is.null(gcs) && !is.null(gcs$CodesetId)) where_parts <- c(where_parts, get_codeset_in_expression(gcs$CodesetId, "P.gender_concept_id", gcs$IsExclusion %||% FALSE))
+  }
   where_clause <- if (length(where_parts) > 0) paste0("WHERE ", paste(where_parts, collapse = " AND ")) else ""
-  paste0("-- Begin Drug Era Criteria\nSELECT C.person_id, C.drug_era_id as event_id, C.start_date, C.end_date, CAST(NULL as bigint) as visit_occurrence_id, C.start_date as sort_date, C.drug_concept_id as domain_concept_id\nFROM \n(\n  SELECT ", select_clause, ordinal, "\n  FROM ", cdm_schema, ".DRUG_ERA de\n  ", codeset_clause, "\n) C\n", where_clause, "\n-- End Drug Era Criteria")
+  paste0("-- Begin Drug Era Criteria\nSELECT C.person_id, C.drug_era_id as event_id, C.start_date, C.end_date, CAST(NULL as bigint) as visit_occurrence_id, C.start_date as sort_date, C.drug_concept_id as domain_concept_id\nFROM \n(\n  SELECT ", select_clause, ordinal, "\n  FROM ", cdm_schema, ".DRUG_ERA de\n  ", codeset_clause, "\n) C\n", join_clause, "\n", where_clause, "\n-- End Drug Era Criteria")
 }
 
 #' Build Dose Era SQL
@@ -1244,11 +1296,37 @@ build_dose_era_sql <- function(criteria, cdm_schema = "@cdm_database_schema") {
   codeset_clause <- get_codeset_where_clause(criteria$CodesetId %||% criteria$codesetId, "de.drug_concept_id")
   first <- criteria$First %||% criteria$first %||% FALSE
   ordinal <- if (first) ", row_number() over (PARTITION BY de.person_id ORDER BY de.dose_era_start_date) as ordinal" else ""
-  select_clause <- "de.person_id, de.dose_era_id, de.drug_concept_id, de.dose_era_start_date as start_date, de.dose_era_end_date as end_date"
+  select_clause <- "de.person_id, de.dose_era_id, de.drug_concept_id, de.unit_concept_id, de.dose_value, de.dose_era_start_date as start_date, de.dose_era_end_date as end_date"
+  join_clause <- ""
   where_parts <- character(0)
   if (first) where_parts <- c(where_parts, "C.ordinal = 1")
+  # EraStartDate / OccurrenceStartDate
+  osd <- criteria$EraStartDate %||% criteria$eraStartDate %||% criteria$OccurrenceStartDate %||% criteria$occurrenceStartDate
+  if (!is.null(osd)) { cl <- build_date_range_clause("C.start_date", osd); if (!is.null(cl)) where_parts <- c(where_parts, cl) }
+  # EraEndDate / OccurrenceEndDate
+  oed <- criteria$EraEndDate %||% criteria$eraEndDate %||% criteria$OccurrenceEndDate %||% criteria$occurrenceEndDate
+  if (!is.null(oed)) { cl <- build_date_range_clause("C.end_date", oed); if (!is.null(cl)) where_parts <- c(where_parts, cl) }
+  # EraLength
+  el <- criteria$EraLength %||% criteria$eraLength
+  if (!is.null(el)) { cl <- build_numeric_range_clause("DATEDIFF(d,C.start_date, C.end_date)", el); if (!is.null(cl)) where_parts <- c(where_parts, cl) }
+  # DoseValue
+  dv <- criteria$DoseValue %||% criteria$doseValue
+  if (!is.null(dv)) { cl <- build_numeric_range_clause("C.dose_value", dv, "%.4f"); if (!is.null(cl)) where_parts <- c(where_parts, cl) }
+  # Unit
+  unit <- criteria$Unit %||% criteria$unit
+  if (length(unit) > 0) { ids <- get_concept_ids(unit); if (length(ids) > 0) where_parts <- c(where_parts, paste0("C.unit_concept_id in (", paste(ids, collapse = ","), ")")) }
+  # Age, Gender
+  age <- criteria$AgeAtStart %||% criteria$ageAtStart %||% criteria$Age %||% criteria$age
+  gender <- criteria$Gender %||% criteria$gender
+  gcs <- criteria$GenderCS %||% criteria$genderCS
+  if (!is.null(age) || length(gender) > 0 || (!is.null(gcs) && !is.null(gcs$CodesetId))) {
+    join_clause <- paste0("JOIN ", cdm_schema, ".PERSON P on C.person_id = P.person_id")
+    if (!is.null(age)) { cl <- build_numeric_range_clause("YEAR(C.start_date) - P.year_of_birth", age); if (!is.null(cl)) where_parts <- c(where_parts, cl) }
+    if (length(gender) > 0) { ids <- get_concept_ids(gender); if (length(ids) > 0) where_parts <- c(where_parts, paste0("P.gender_concept_id in (", paste(ids, collapse = ","), ")")) }
+    if (!is.null(gcs) && !is.null(gcs$CodesetId)) where_parts <- c(where_parts, get_codeset_in_expression(gcs$CodesetId, "P.gender_concept_id", gcs$IsExclusion %||% FALSE))
+  }
   where_clause <- if (length(where_parts) > 0) paste0("WHERE ", paste(where_parts, collapse = " AND ")) else ""
-  paste0("-- Begin Dose Era Criteria\nSELECT C.person_id, C.dose_era_id as event_id, C.start_date, C.end_date, CAST(NULL as bigint) as visit_occurrence_id, C.start_date as sort_date, C.drug_concept_id as domain_concept_id\nFROM \n(\n  SELECT ", select_clause, ordinal, "\n  FROM ", cdm_schema, ".DOSE_ERA de\n  ", codeset_clause, "\n) C\n", where_clause, "\n-- End Dose Era Criteria")
+  paste0("-- Begin Dose Era Criteria\nSELECT C.person_id, C.dose_era_id as event_id, C.start_date, C.end_date, CAST(NULL as bigint) as visit_occurrence_id, C.start_date as sort_date, C.drug_concept_id as domain_concept_id\nFROM \n(\n  SELECT ", select_clause, ordinal, "\n  FROM ", cdm_schema, ".DOSE_ERA de\n  ", codeset_clause, "\n) C\n", join_clause, "\n", where_clause, "\n-- End Dose Era Criteria")
 }
 
 #' Build Visit Detail SQL

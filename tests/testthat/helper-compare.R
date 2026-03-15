@@ -152,6 +152,99 @@ compare_cohort_dfs <- function(df_old, df_new) {
   )
 }
 
+#' Compare two cohort data frames with mismatch detail for debugging.
+#' @param df_old Data frame from the reference cohort table.
+#' @param df_new Data frame from the new cohort table to validate.
+#' @return List with summary fields from compare_cohort_dfs plus mismatch_details.
+#' @noRd
+compare_cohort_dfs_detailed <- function(df_old, df_new) {
+  summary <- compare_cohort_dfs(df_old, df_new)
+  key_cols <- c("cohort_definition_id", "subject_id",
+                "cohort_start_date", "cohort_end_date")
+  key_present <- key_cols[key_cols %in% names(df_old) & key_cols %in% names(df_new)]
+
+  normalize_df <- function(df) {
+    df <- df[, key_present, drop = FALSE]
+    for (col in c("cohort_definition_id", "subject_id")) {
+      if (col %in% names(df)) df[[col]] <- as.integer(df[[col]])
+    }
+    for (col in c("cohort_start_date", "cohort_end_date")) {
+      if (col %in% names(df)) df[[col]] <- as.character(as.Date(df[[col]]))
+    }
+    df
+  }
+
+  df_old <- normalize_df(df_old)
+  df_new <- normalize_df(df_new)
+
+  row_key <- function(df) {
+    if (nrow(df) == 0L) return(character(0))
+    do.call(paste, c(df[key_present], sep = "|"))
+  }
+
+  mismatch_ids <- summary$per_cohort$cohort_definition_id[!summary$per_cohort$identical]
+  mismatch_details <- lapply(mismatch_ids, function(cid) {
+    old_c <- df_old[df_old$cohort_definition_id == cid, , drop = FALSE]
+    new_c <- df_new[df_new$cohort_definition_id == cid, , drop = FALSE]
+    old_keys <- row_key(old_c)
+    new_keys <- row_key(new_c)
+    data.frame(
+      cohort_definition_id = cid,
+      rows_old = nrow(old_c),
+      rows_new = nrow(new_c),
+      only_in_old = sum(!old_keys %in% new_keys),
+      only_in_new = sum(!new_keys %in% old_keys),
+      stringsAsFactors = FALSE
+    )
+  })
+
+  summary$mismatch_details <- if (length(mismatch_details) > 0L) {
+    do.call(rbind, mismatch_details)
+  } else {
+    data.frame(
+      cohort_definition_id = integer(0),
+      rows_old = integer(0),
+      rows_new = integer(0),
+      only_in_old = integer(0),
+      only_in_new = integer(0),
+      stringsAsFactors = FALSE
+    )
+  }
+
+  summary
+}
+
+#' Ensure cohort_name values are unique for benchmark batches.
+#' @param cohort_set Cohort set data frame.
+#' @return Cohort set data frame with deterministic unique cohort_name values.
+#' @noRd
+make_unique_cohort_names <- function(cohort_set) {
+  cohort_set$original_cohort_definition_id <- as.integer(cohort_set$cohort_definition_id)
+  cohort_set$cohort_definition_id <- seq_len(nrow(cohort_set))
+
+  if (!"cohort_name" %in% names(cohort_set)) {
+    cohort_set$cohort_name <- paste0("cohort_", cohort_set$cohort_definition_id)
+    return(cohort_set)
+  }
+
+  base_names <- as.character(cohort_set$cohort_name)
+  missing_idx <- is.na(base_names) | !nzchar(base_names)
+  base_names[missing_idx] <- paste0("cohort_", cohort_set$cohort_definition_id[missing_idx])
+
+  dup_index <- ave(seq_along(base_names), base_names, FUN = seq_along)
+  is_dup <- duplicated(base_names) | duplicated(base_names, fromLast = TRUE)
+  base_names[is_dup] <- paste0(
+    base_names[is_dup],
+    "_",
+    cohort_set$cohort_definition_id[is_dup],
+    "_",
+    dup_index[is_dup]
+  )
+
+  cohort_set$cohort_name <- base_names
+  cohort_set
+}
+
 #' Unzip bundled cohorts to a temporary directory.
 #' Returns the path to the temp directory containing JSON files.
 #' Caller is responsible for cleanup (or use withr::defer).
