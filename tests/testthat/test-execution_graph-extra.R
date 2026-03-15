@@ -234,11 +234,11 @@ test_that("normalize_qualified_events_for_hash ignores QualifiedLimit without ad
   expect_equal(result$q_limit, "ALL")
 })
 
-test_that("normalize_qualified_events_for_hash preserves QualifiedLimit for single primary criteria", {
+test_that("normalize_qualified_events_for_hash ignores QualifiedLimit for single primary criteria without additional criteria", {
   def <- list(pe_hash = "abc123", ac_hash = "", q_sort = "desc", q_limit = "First", scoped_single_primary = TRUE)
   result <- CohortDAG:::normalize_qualified_events_for_hash(def)
-  expect_equal(result$q_sort, "DESC")
-  expect_equal(result$q_limit, "FIRST")
+  expect_equal(result$q_sort, "ASC")
+  expect_equal(result$q_limit, "ALL")
 })
 
 # --- normalize_criteria_group_for_hash ---
@@ -934,7 +934,7 @@ test_that("emit_included_events with ExpressionLimit First", {
 
   result <- CohortDAG:::emit_included_events(ie_node, dag, options)
   expect_true(grepl("ordinal = 1", result))
-  expect_true(grepl("order by start_date ASC, end_date DESC, event_id\\) as ordinal", result, ignore.case = TRUE))
+  expect_true(grepl("order by start_date ASC\\) as ordinal", result, ignore.case = TRUE))
 })
 
 # --- emit_inclusion_rule ---
@@ -1472,7 +1472,7 @@ test_that("emit_included_events with ExpressionLimit First", {
 
   result <- CohortDAG:::emit_included_events(ie_node, dag, options)
   expect_true(grepl("ordinal = 1", result))
-  expect_true(grepl("order by start_date ASC, end_date DESC, event_id\\) as ordinal", result, ignore.case = TRUE))
+  expect_true(grepl("order by start_date ASC\\) as ordinal", result, ignore.case = TRUE))
 })
 
 # --- emit_inclusion_rule ---

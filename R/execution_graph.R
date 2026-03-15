@@ -208,16 +208,14 @@ normalize_primary_events_for_hash <- function(def) {
 #' @noRd
 normalize_qualified_events_for_hash <- function(def) {
   ac <- as.character(def$ac_hash %||% "")
-  scoped_single_primary <- isTRUE(def$scoped_single_primary)
   list(
     t = "qe",
     pe_hash = as.character(def$pe_hash),
     ac_hash = ac,
-    # The benchmark reference path applies QualifiedLimit for additional
-    # criteria and for a narrower class of single-primary cohorts that also
-    # use downstream event limiting or inclusion rules.
-    q_sort = if (nzchar(ac) || scoped_single_primary) toupper(def$q_sort %||% "ASC") else "ASC",
-    q_limit = if (nzchar(ac) || scoped_single_primary) toupper(def$q_limit %||% "ALL") else "ALL"
+    # Match Circe SQL generation: QualifiedLimit only affects the
+    # qualified-events stage when additional criteria are present.
+    q_sort = if (nzchar(ac)) toupper(def$q_sort %||% "ASC") else "ASC",
+    q_limit = if (nzchar(ac)) toupper(def$q_limit %||% "ALL") else "ALL"
   )
 }
 
@@ -664,15 +662,12 @@ decompose_cohort <- function(cohort, cohort_id, cohort_idx, cs_map, nodes, optio
   el <- get_key(cohort, c("ExpressionLimit", "expressionLimit"))
   el_type <- toupper((el$Type %||% el$type) %||% "ALL")
   inclusion_rules <- get_key(cohort, c("InclusionRules", "inclusionRules")) %||% list()
-  scoped_single_primary <- length(criteria_list) == 1L &&
-    (!identical(el_type, "ALL") || length(inclusion_rules) > 0L)
 
   qe_def <- list(
     pe_hash = pe_hash,
     ac_hash = ac_hash,
     q_sort = q_sort,
     q_limit = ql_type,
-    scoped_single_primary = scoped_single_primary,
     # Original structures for SQL generation
     additional_criteria = add_criteria,
     cohort_idx = cohort_idx  # for codeset ID remapping
@@ -1289,7 +1284,7 @@ emit_qualified_events <- function(node, dag, options) {
   q_limit <- def$q_limit %||% "All"
 
   has_additional_criteria <- !is.null(add_criteria) && !is_group_empty(add_criteria)
-  use_qualified_limit <- has_additional_criteria || isTRUE(def$scoped_single_primary)
+  use_qualified_limit <- has_additional_criteria
   qualified_limit_filter <- if (use_qualified_limit && !identical(toupper(q_limit), "ALL")) {
     "\nWHERE QE.ordinal = 1"
   } else {
@@ -1419,11 +1414,10 @@ emit_included_events <- function(node, dag, options) {
       if (!use_view) paste0("into ", tbl, "\n") else "",
       "from (\n",
       "  select event_id, person_id, start_date, end_date, op_start_date, op_end_date, ",
-      # DuckDB does not preserve grouped row order for same-day ties here.
-      # Make the tie-break explicit so the selected event matches the
-      # reference path's longer same-day event on batch benchmarks.
+      # Match Circe SQL shape here. The reference path applies
+      # ExpressionLimit ordering on start_date only.
       "row_number() over (partition by person_id order by start_date ", el_sort,
-      ", end_date DESC, event_id) as ordinal\n",
+      ") as ordinal\n",
       "  from\n  (\n",
       bitmask_query,
       "  ) MG -- matching groups\n",
