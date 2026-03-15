@@ -3,8 +3,7 @@ Title: DAG-Based Batch Cohort SQL Generation for OMOP CDM
 Version: 0.2.0
 Authors@R: c(
     person("Adam", "Black", , "ablack3@gmail.com", role = c("aut", "cre"),
-           comment = c(ORCID = "0000-0001-5576-8701")),
-    person("Artem", "Gorbachev", , "artem.gorbachev@odysseusinc.com", role = "aut")
+           comment = c(ORCID = "0000-0001-5576-8701"))
   )
 Description: Generates optimized batch SQL for ATLAS/OHDSI cohort definitions
     using a directed acyclic graph (DAG) execution plan. Deduplicates shared
