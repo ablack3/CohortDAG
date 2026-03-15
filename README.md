@@ -4,6 +4,14 @@
 
 `CohortDAG` generates OMOP CDM cohorts from ATLAS-style cohort definitions using a DAG-based batch execution plan.
 
+## Attributions
+
+This work relies heavily on [OHDSI/circe-be](https://github.com/OHDSI/circe-be),
+by Chris Knoll and others, as well as
+[OHDSI/SqlRender](https://github.com/OHDSI/SqlRender), by Martijn Schuemie and
+others, and [OHDSI/circepy](https://github.com/OHDSI/circepy) by `@azimov`.
+This package was generated using AI coding tools and is experimental code.
+
 ## Install from GitHub
 
 ```r
