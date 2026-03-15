@@ -1,6 +1,6 @@
 # CohortDAG
 
-> **Experimental software:** CohortDAG is experimental software and should be treated as such in production or analytical workflows.
+> **Experimental software:** CohortDAG is experimental software. Do not use in production workflows.
 
 `CohortDAG` generates OMOP CDM cohorts from ATLAS-style cohort definitions using a DAG-based batch execution plan.
 
