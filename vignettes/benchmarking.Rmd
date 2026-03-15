@@ -29,6 +29,14 @@ Supported platforms include **PostgreSQL**, **Redshift**, **Snowflake**, **Spark
 and **SQL Server**. You provide a named list of CDM reference objects; the script
 handles timing, comparison, and CSV output.
 
+## Credits and status
+
+This work relies heavily on [OHDSI/circe-be](https://github.com/OHDSI/circe-be),
+by Chris Knoll and others, as well as
+[OHDSI/SqlRender](https://github.com/OHDSI/SqlRender), by Martijn Schuemie and
+others, and [OHDSI/circepy](https://github.com/OHDSI/circepy) by `@azimov`.
+This package was generated using AI coding tools and is experimental code.
+
 ## Performance improvements with the new approach
 
 The new approach (`generateCohortSet2`) uses a **DAG-based batch optimizer** that:

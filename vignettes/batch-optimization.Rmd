@@ -35,6 +35,14 @@ This vignette explains:
 3. How we guarantee equivalence between the two approaches
 4. Performance characteristics under different workload types
 
+## Credits and status
+
+This work relies heavily on [OHDSI/circe-be](https://github.com/OHDSI/circe-be),
+by Chris Knoll and others, as well as
+[OHDSI/SqlRender](https://github.com/OHDSI/SqlRender), by Martijn Schuemie and
+others, and [OHDSI/circepy](https://github.com/OHDSI/circepy) by `@azimov`.
+This package was generated using AI coding tools and is experimental code.
+
 ## The One-at-a-Time Approach
 
 The traditional CIRCE approach generates a fully self-contained SQL script for
