@@ -799,6 +799,7 @@ test_that("emit_primary_events generates SQL for ConditionOccurrence", {
   expect_true(nchar(result) > 100)
   expect_true(grepl("primary_events|person_id|start_date", result, ignore.case = TRUE))
   expect_true(grepl("observation_period", result, ignore.case = TRUE))
+  expect_true(grepl("order by E.sort_date ASC, E.event_id, OP.observation_period_end_date DESC, OP.observation_period_start_date ASC", result, fixed = TRUE))
 })
 
 # --- emit_qualified_events ---
@@ -934,7 +935,23 @@ test_that("emit_included_events with ExpressionLimit First", {
 
   result <- CohortDAG:::emit_included_events(ie_node, dag, options)
   expect_true(grepl("ordinal = 1", result))
-  expect_true(grepl("order by start_date ASC\\) as ordinal", result, ignore.case = TRUE))
+  expect_true(grepl("order by start_date ASC, end_date DESC, event_id\\) as ordinal", result, ignore.case = TRUE))
+})
+
+test_that("emit_final_cohort hardens same-day era ordering", {
+  cohort <- make_simple_cohort()
+  dag <- CohortDAG:::build_execution_dag(list(cohort), 1L, list())
+  options <- list(cdm_schema = "cdm", results_schema = "results", table_prefix = "atlas_test_")
+
+  final_node <- NULL
+  for (n in dag$nodes) {
+    if (n$type == "final_cohort") { final_node <- n; break }
+  }
+  expect_false(is.null(final_node))
+
+  result <- CohortDAG:::emit_final_cohort(final_node, dag, options)
+  expect_true(grepl("order by start_date, end_date desc, is_start desc", result, ignore.case = TRUE))
+  expect_true(grepl("order by start_date, end_date desc rows between unbounded preceding and 1 preceding", result, ignore.case = TRUE))
 })
 
 # --- emit_inclusion_rule ---
@@ -1354,6 +1371,7 @@ test_that("emit_primary_events generates SQL for ConditionOccurrence", {
   expect_true(nchar(result) > 100)
   expect_true(grepl("primary_events|person_id|start_date", result, ignore.case = TRUE))
   expect_true(grepl("observation_period", result, ignore.case = TRUE))
+  expect_true(grepl("order by E.sort_date ASC, E.event_id, OP.observation_period_end_date DESC, OP.observation_period_start_date ASC", result, fixed = TRUE))
 })
 
 # --- emit_qualified_events ---
@@ -1472,7 +1490,23 @@ test_that("emit_included_events with ExpressionLimit First", {
 
   result <- CohortDAG:::emit_included_events(ie_node, dag, options)
   expect_true(grepl("ordinal = 1", result))
-  expect_true(grepl("order by start_date ASC\\) as ordinal", result, ignore.case = TRUE))
+  expect_true(grepl("order by start_date ASC, end_date DESC, event_id\\) as ordinal", result, ignore.case = TRUE))
+})
+
+test_that("emit_final_cohort hardens same-day era ordering", {
+  cohort <- make_simple_cohort()
+  dag <- CohortDAG:::build_execution_dag(list(cohort), 1L, list())
+  options <- list(cdm_schema = "cdm", results_schema = "results", table_prefix = "atlas_test_")
+
+  final_node <- NULL
+  for (n in dag$nodes) {
+    if (n$type == "final_cohort") { final_node <- n; break }
+  }
+  expect_false(is.null(final_node))
+
+  result <- CohortDAG:::emit_final_cohort(final_node, dag, options)
+  expect_true(grepl("order by start_date, end_date desc, is_start desc", result, ignore.case = TRUE))
+  expect_true(grepl("order by start_date, end_date desc rows between unbounded preceding and 1 preceding", result, ignore.case = TRUE))
 })
 
 # --- emit_inclusion_rule ---

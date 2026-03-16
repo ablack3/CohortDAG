@@ -726,6 +726,12 @@ generateCohortSet2 <- function(cdm,
   # than SqlRender) using focused stringi transforms.
   # For other dialects: per-statement pure-R translation (avoids O(n^2) batch scaling).
   translated <- translate_cohort_stmts(sql_split, target_dialect)
+  profile_sql_file <- getOption("CohortDAG.profile_sql_file", Sys.getenv("COHORTDAG_PROFILE_SQL_FILE", unset = ""))
+  profile_rows <- if (is.character(profile_sql_file) && length(profile_sql_file) == 1L && nzchar(profile_sql_file)) {
+    vector("list", length(translated))
+  } else {
+    NULL
+  }
 
   n <- length(translated)
   pb <- utils::txtProgressBar(min = 0, max = n, style = 3)
@@ -769,12 +775,27 @@ generateCohortSet2 <- function(cdm,
         utils::setTxtProgressBar(pb, i)
         next
       }
+      stmt_time <- system.time({
       tryCatch({
         DBI::dbExecute(con, stmt)
       }, error = function(e) {
         cat("Failing statement ", i, ":\n", stmt, "\n")
         stop(e)
       })
+      })
+      if (!is.null(profile_rows)) {
+        stmt_trim <- trimws(stmt)
+        stmt_head <- gsub("[\r\n\t ]+", " ", stmt_trim)
+        profile_rows[[i]] <- data.frame(
+          cohort_table = name,
+          statement_idx = i,
+          elapsed_sec = round(unname(stmt_time[["elapsed"]]), 6),
+          keyword = sub("^([A-Za-z]+).*$", "\\1", stmt_head),
+          n_chars = nchar(stmt),
+          sql_head = substr(stmt_head, 1L, 160L),
+          stringsAsFactors = FALSE
+        )
+      }
       utils::setTxtProgressBar(pb, i)
       flush.console()
     }
@@ -800,6 +821,13 @@ generateCohortSet2 <- function(cdm,
     # Cached: leave tables in place on error (partial progress is still valid)
     stop(e)
   })
+  if (!is.null(profile_rows)) {
+    profile_df <- do.call(rbind, Filter(Negate(is.null), profile_rows))
+    if (!is.null(profile_df) && nrow(profile_df) > 0L) {
+      dir.create(dirname(profile_sql_file), recursive = TRUE, showWarnings = FALSE)
+      utils::write.csv(profile_df, profile_sql_file, row.names = FALSE)
+    }
+  }
 
   # Snowflake: unquoted column names are stored as UPPERCASE, but CDMConnector
   # requires lowercase. Recreate output tables with lowercase column aliases.

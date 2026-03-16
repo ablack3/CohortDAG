@@ -212,8 +212,6 @@ normalize_qualified_events_for_hash <- function(def) {
     t = "qe",
     pe_hash = as.character(def$pe_hash),
     ac_hash = ac,
-    # Match Circe SQL generation: QualifiedLimit only affects the
-    # qualified-events stage when additional criteria are present.
     q_sort = if (nzchar(ac)) toupper(def$q_sort %||% "ASC") else "ASC",
     q_limit = if (nzchar(ac)) toupper(def$q_limit %||% "ALL") else "ALL"
   )
@@ -1228,7 +1226,8 @@ emit_primary_events <- function(node, dag, options) {
     "op_start_date, op_end_date, cast(P.visit_occurrence_id as bigint) as visit_occurrence_id\n",
     "from\n(\n",
     "  select E.person_id, E.start_date, E.end_date,\n",
-    "         row_number() over (partition by E.person_id order by E.sort_date ", event_sort, ", E.event_id) ordinal,\n",
+    "         row_number() over (partition by E.person_id order by E.sort_date ", event_sort,
+    ", E.event_id, OP.observation_period_end_date DESC, OP.observation_period_start_date ASC) ordinal,\n",
     "         OP.observation_period_start_date as op_start_date, OP.observation_period_end_date as op_end_date, ",
     "cast(E.visit_occurrence_id as bigint) as visit_occurrence_id\n",
     "  FROM\n  (\n  ", criteria_union, "\n  ) E\n",
@@ -1414,10 +1413,10 @@ emit_included_events <- function(node, dag, options) {
       if (!use_view) paste0("into ", tbl, "\n") else "",
       "from (\n",
       "  select event_id, person_id, start_date, end_date, op_start_date, op_end_date, ",
-      # Match Circe SQL shape here. The reference path applies
-      # ExpressionLimit ordering on start_date only.
+      # Prefer longer same-day events to match the reference path's
+      # subject-level event selection on live Snowflake data.
       "row_number() over (partition by person_id order by start_date ", el_sort,
-      ") as ordinal\n",
+      ", end_date DESC, event_id) as ordinal\n",
       "  from\n  (\n",
       bitmask_query,
       "  ) MG -- matching groups\n",
@@ -1683,10 +1682,10 @@ emit_final_cohort <- function(node, dag, options) {
     "DATEADD(day,-1 * ", era_pad, ", max(end_date)) as end_date\n",
     "  from (\n",
     "    select person_id, start_date, end_date, ",
-    "sum(is_start) over (partition by person_id order by start_date, is_start desc rows unbounded preceding) group_idx\n",
+    "sum(is_start) over (partition by person_id order by start_date, end_date desc, is_start desc rows unbounded preceding) group_idx\n",
     "    from (\n",
     "      select person_id, start_date, end_date,\n",
-    "        case when max(end_date) over (partition by person_id order by start_date rows between unbounded preceding and 1 preceding) >= start_date then 0 else 1 end is_start\n",
+    "        case when max(end_date) over (partition by person_id order by start_date, end_date desc rows between unbounded preceding and 1 preceding) >= start_date then 0 else 1 end is_start\n",
     "      from (\n",
     "        select person_id, start_date, DATEADD(day,", era_pad, ",end_date) as end_date\n",
     "        from cohort_rows\n",
